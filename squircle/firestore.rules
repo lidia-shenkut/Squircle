@@ -1,0 +1,117 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return request.auth.uid == uid;
+    }
+
+    function isGroupMember(groupId) {
+      return request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.member_uids;
+    }
+
+    function isGroupAdmin(groupId) {
+      return request.auth.uid == get(/databases/$(database)/documents/groups/$(groupId)).data.admin_uid;
+    }
+
+    // ── Users ─────────────────────────────────────────────────────────────────
+    match /users/{uid} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isOwner(uid);
+      allow update: if isAuthenticated() && isOwner(uid);
+      allow delete: if isAuthenticated() && isOwner(uid);
+    }
+
+    // ── Username lookup ───────────────────────────────────────────────────────
+    match /usernames/{username} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+
+    // ── Groups ────────────────────────────────────────────────────────────────
+    match /groups/{groupId} {
+      allow read: if isAuthenticated() && isGroupMember(groupId);
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && isGroupMember(groupId);
+      allow delete: if isAuthenticated() && isGroupAdmin(groupId);
+
+      // Messages
+      match /messages/{messageId} {
+        allow read: if isAuthenticated() && isGroupMember(groupId);
+        allow create: if isAuthenticated() && isGroupMember(groupId);
+        allow update: if isAuthenticated() && isGroupMember(groupId);
+        allow delete: if isAuthenticated() &&
+          (resource.data.sender_uid == request.auth.uid || isGroupAdmin(groupId));
+      }
+
+      // Memory posts
+      match /memory_posts/{postId} {
+        allow read: if isAuthenticated() && isGroupMember(groupId);
+        allow create: if isAuthenticated() && isGroupMember(groupId);
+        allow update: if isAuthenticated() && isGroupMember(groupId);
+        allow delete: if isAuthenticated() &&
+          (resource.data.author_uid == request.auth.uid || isGroupAdmin(groupId));
+      }
+
+      // Events
+      match /events/{eventId} {
+        allow read: if isAuthenticated() && isGroupMember(groupId);
+        allow create: if isAuthenticated() && isGroupMember(groupId);
+        allow update: if isAuthenticated() && isGroupMember(groupId);
+        allow delete: if isAuthenticated() &&
+          (resource.data.creator_uid == request.auth.uid || isGroupAdmin(groupId));
+      }
+
+      // Mood check-ins
+      match /mood_checkins/{checkinId} {
+        allow read: if isAuthenticated() && isGroupMember(groupId);
+        allow create: if isAuthenticated() && isGroupMember(groupId);
+        allow update: if isAuthenticated() && isGroupMember(groupId);
+        allow delete: if isAuthenticated() &&
+          (resource.data.author_uid == request.auth.uid || isGroupAdmin(groupId));
+      }
+
+      // Game sessions
+      match /game_sessions/{sessionId} {
+        allow read: if isAuthenticated() && isGroupMember(groupId);
+        allow create: if isAuthenticated() && isGroupMember(groupId);
+        allow update: if isAuthenticated() && isGroupMember(groupId);
+        allow delete: if isAuthenticated() && isGroupAdmin(groupId);
+      }
+
+      // Analytics (read-only for members; written by Cloud Functions)
+      match /analytics/{doc} {
+        allow read: if isAuthenticated() && isGroupMember(groupId);
+        allow write: if false; // Only Cloud Functions via Admin SDK
+      }
+
+      // Pending invites
+      match /pending_invites/{inviteId} {
+        allow read: if isAuthenticated() && isGroupAdmin(groupId);
+        allow create: if isAuthenticated() && isGroupAdmin(groupId);
+        allow delete: if isAuthenticated() && isGroupAdmin(groupId);
+      }
+    }
+
+    // ── Streaks (written by Cloud Functions) ──────────────────────────────────
+    match /streaks/{docId} {
+      allow read: if isAuthenticated() &&
+        resource.data.uid == request.auth.uid;
+      allow write: if false; // Only Cloud Functions via Admin SDK
+    }
+
+    // ── Notification preferences ──────────────────────────────────────────────
+    match /notification_prefs/{uid} {
+      allow read, write: if isAuthenticated() && isOwner(uid);
+
+      match /groups/{groupId} {
+        allow read, write: if isAuthenticated() && isOwner(uid);
+      }
+    }
+  }
+}
